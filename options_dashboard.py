@@ -8,16 +8,18 @@ from scipy.interpolate import CubicSpline
 from datetime import datetime
 
 
+@st.cache_data(ttl=300)
 def get_options_chain(ticker, expiry):
-    @st.cache_data(ttl=300)
     stock = yf.Ticker(ticker)
     chain = stock.option_chain(expiry)
     return chain.calls, chain.puts
+
 
 @st.cache_data(ttl=300)
 def get_stock_info(ticker):
     stock = yf.Ticker(ticker)
     return stock.options, stock.info['regularMarketPrice']
+
 
 def black_scholes(S, K, T, r, sigma):
     d1 = (np.log(S/K) + (r + sigma**2/2) * T) / (sigma * np.sqrt(T))
@@ -212,7 +214,6 @@ st.subheader("Greeks Visualization")
 
 S_range = np.linspace(S * 0.5, S * 1.5, 200)
 
-
 delta_calls = [delta(s, K, T, r, sigma)[0] for s in S_range]
 delta_puts = [delta(s, K, T, r, sigma)[1] for s in S_range]
 gamma_values = [gamma(s, K, T, r, sigma) for s in S_range]
@@ -287,16 +288,22 @@ st.write("---")
 st.subheader("Live Options Data")
 st.caption("Note: built on free yfinance data, which has quality limitations. For the cleanest skew, select a liquid expiry 1-3 months out during market hours.")
 ticker_input = st.text_input("Enter Ticker", value="SPY")
+
+try:
+    expiry_dates, current_price = get_stock_info(ticker_input)
+except Exception as e:
+    st.error("Unable to fetch live data — Yahoo Finance rate limit reached. Please try again in a few minutes, or run locally for full functionality.")
+    st.stop()
+
 expiry_input = st.selectbox("Select Expiry", expiry_dates)
 calls, puts = get_options_chain(ticker_input, expiry_input)
-expiry_dates, current_price = get_stock_info(ticker_input)
+
 calls_clean = calls[(calls['impliedVolatility'] > 0.01) & (calls['impliedVolatility'] < 2.0) & (calls['volume'] > 5) & (calls['strike'] >= current_price)]
 puts_clean = puts[(puts['impliedVolatility'] > 0.01) & (puts['impliedVolatility'] < 2.0) & (puts['volume'] > 5) & (puts['strike'] < current_price)]
 
 expiry_date = datetime.strptime(expiry_input, "%Y-%m-%d")
 today = datetime.today()
 T_expiry = max((expiry_date - today).days / 365, 1/365)
-
 
 combined = pd.concat([puts_clean, calls_clean]).sort_values('strike')
 combined = combined[combined['volume'] > 20]
@@ -320,7 +327,6 @@ high_strike_iv = float(cs(high_strike))
 left_wing_diff = ((low_strike_iv - atm_iv) / atm_iv) * 100
 right_wing_diff = ((high_strike_iv - atm_iv) / atm_iv) * 100
 
-
 if right_wing_diff <= 0:
     shape_text = "The right wing shows no elevation relative to ATM. The skew is concentrated entirely on the downside (put) wing, a strong equity-style skew."
 elif left_wing_diff <= 0:
@@ -334,13 +340,11 @@ else:
     else:
         shape_text = f"Both wings are elevated by roughly similar amounts (ratio of {wing_ratio:.1f}). This results in a smile shape, which can reflect an upcoming event with a huge swing either way."
 
-
 st.markdown("Black-Scholes assumes a single constant volatility across all strikes. In reality, implied volatility varies by strike, reflecting market demand for protection against large moves. A downward-sloping skew (elevated put-side vol) generally reflects demand for downside protection. A smile (both wings elevated) is more common where large moves in either direction are expected.")
 
 st.markdown(f"**For {ticker_input} at the {expiry_input} expiry:** ATM implied vol is {atm_iv*100:.1f}%. The downside wing is {left_wing_diff:.0f}% higher than ATM, and the upside wing is {right_wing_diff:.0f}% higher than ATM.")
 
 st.markdown(f"**Volatility Shape:** {shape_text}")
-
 
 fig, ax = plt.subplots(figsize=(5, 3))
 ax.plot(strike_smooth, iv_smooth, label="Implied Volatility (fitted)", linewidth=1.5)
@@ -348,12 +352,11 @@ ax.scatter(combined['strike'], combined['impliedVolatility'], s=5, alpha=0.3, la
 ax.axvline(x=current_price, color="green", linestyle="--", label="Current Stock Price")
 ax.set_xlabel("Strike Price")
 ax.set_ylabel("Implied Volatility")
-ax.set_title(f"Volatility Skew — {ticker_input} {expiry_input}")
+ax.set_title(f"Volatility Skew - {ticker_input} {expiry_input}")
 ax.legend(fontsize=6)
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     st.pyplot(fig, use_container_width=True)
-
 
 
 st.write("---")
@@ -361,7 +364,6 @@ st.subheader("Market-Implied Greeks")
 st.caption("Greeks computed using fitted implied volatility at each strike, rather than Black-Scholes constant vol assumption.")
 
 strike_range = np.linspace(combined['strike'].min(), combined['strike'].max(), 200)
-
 fitted_vols = np.clip(cs(strike_range), 0.01, None)
 
 market_delta_calls = [delta(current_price, k, T_expiry, 0.05, v)[0] for k, v in zip(strike_range, fitted_vols)]
@@ -380,7 +382,7 @@ with col1:
     ax.set_title("Market-Implied Delta vs Strike")
     ax.legend(fontsize=6)
     st.pyplot(fig, use_container_width=True)
-with col2: 
+with col2:
     fig, ax = plt.subplots(figsize=(5, 3))
     ax.plot(strike_range, market_gamma, label="Gamma (market vol)")
     ax.axvline(x=current_price, color="green", linestyle="--", label="Current Stock Price")
