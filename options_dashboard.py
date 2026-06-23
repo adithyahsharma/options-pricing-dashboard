@@ -9,10 +9,15 @@ from datetime import datetime
 
 
 def get_options_chain(ticker, expiry):
+    @st.cache_data(ttl=300)
     stock = yf.Ticker(ticker)
     chain = stock.option_chain(expiry)
     return chain.calls, chain.puts
 
+@st.cache_data(ttl=300)
+def get_stock_info(ticker):
+    stock = yf.Ticker(ticker)
+    return stock.options, stock.info['regularMarketPrice']
 
 def black_scholes(S, K, T, r, sigma):
     d1 = (np.log(S/K) + (r + sigma**2/2) * T) / (sigma * np.sqrt(T))
@@ -282,11 +287,9 @@ st.write("---")
 st.subheader("Live Options Data")
 st.caption("Note: built on free yfinance data, which has quality limitations. For the cleanest skew, select a liquid expiry 1-3 months out during market hours.")
 ticker_input = st.text_input("Enter Ticker", value="SPY")
-stock = yf.Ticker(ticker_input)
-expiry_dates = stock.options
 expiry_input = st.selectbox("Select Expiry", expiry_dates)
 calls, puts = get_options_chain(ticker_input, expiry_input)
-current_price = stock.info['regularMarketPrice']
+expiry_dates, current_price = get_stock_info(ticker_input)
 calls_clean = calls[(calls['impliedVolatility'] > 0.01) & (calls['impliedVolatility'] < 2.0) & (calls['volume'] > 5) & (calls['strike'] >= current_price)]
 puts_clean = puts[(puts['impliedVolatility'] > 0.01) & (puts['impliedVolatility'] < 2.0) & (puts['volume'] > 5) & (puts['strike'] < current_price)]
 
